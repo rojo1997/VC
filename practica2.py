@@ -22,7 +22,7 @@ SIFT = cv2.xfeatures2d.SIFT_create()
 img = cv2.imread("./imagenes/Yosemite1.jpg", 0)
 showImg(img, "1")
 points = SIFT.detect(img,None)
-img = cv2.drawKeypoints(img, points,outImage=None)
+img = cv2.drawKeypoints(img, points,outImage=None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 showImg(img, "1")
 
 print "hola"
