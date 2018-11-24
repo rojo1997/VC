@@ -1,7 +1,7 @@
 ################################################################################
-# Computer Vision
-# Ernesto Martinez del Pino
-# ernestomar1997@correo.ugr.es
+# Computer Vision                                                              #
+# Ernesto Martinez del Pino                                                    #
+# ernestomar1997@correo.ugr.es                                                 #
 ################################################################################
 
 # Importacion de Bibliotecas
@@ -48,6 +48,19 @@ showImg(img, "1")
 print points_SIFT
 print points_SURF
 
+# Funcion para obtener la octava y la escala en sift
+def unpackSIFTOctave(kpt):
+    _octave = kpt.octave
+    octave = _octave&0xFF
+    layer  = (_octave>>8)&0xFF
+    if octave>=128:
+        octave |= -128
+    if octave>=0:
+        scale = float(1/(1<<octave))
+    else:
+        scale = float(1<<-octave)
+    return (octave, layer, scale)
+
 # (c) Calcular los decriptores a partir de los vectores de puntos
 des_SIFT = SIFT.compute(img, points_SIFT)
 des_SURF = SURF.compute(img, points_SURF)
@@ -57,31 +70,79 @@ print des_SURF
 # EJERCICIO 2
 
 # (a) Mostar las imagenes en un canvas y pintar las lineas de los keypoints
-def equiv (img1, img2, cross, dist):
+
+# Funcion que establece las equivalencias por fuerza bruta entre 2 imagenes
+def BruteForceCC (img1, img2, num = 100, best = False):
+    # Calculamos puntos y descriptores de ambas imagenes
+    kp1, des1 = SIFT.detectAndCompute(img1.copy(), None)
+    kp2, des2 = SIFT.detectAndCompute(img2.copy(), None)
+    # Aplicar fuerza bruta y verificacion
+    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+    matches = bf.match(des1, des2)
+    # Ordenamos por la distancia
+    if best:
+        matches = sorted(matches, key = lambda x:x.distance)
+    # Generamos la nueva imagen
+    img3 = cv2.drawMatches(img1,kp1,img2,kp2,matches[:num], None, flags=2)
+    # Devolvemos la imagen
+    return (img3)
+# Funcion que establece las equivalencias usando KNN con filtro
+def LA2NN (img1, img2, num = 100, best = False, dist = 0.7):
     # Calculamos puntos y descriptores de ambas imagenes
     kp1, des1 = SIFT.detectAndCompute(img1.copy(), None)
     kp2, des2 = SIFT.detectAndCompute(img2.copy(), None)
     # Aplicar KNN
-    matches = cv2.BFMatcher().knnMatch(des1, des2, k=2)
-    matchesMask = [[0,0] for i in range(len(matches))]
-    for i,(m,n) in enumerate(matches):
-        if m.distance < (dist * n.distance):
-            matchesMask[i]=[1,0]
-    img3 = None
-    draw_params=dict(matchesMask=matchesMask)
-    img3 = cv2.drawMatchesKnn(img1,kp1,img2,kp2,matches,None,flags=2,**draw_params)
+    bf = cv2.BFMatcher()
+    matches = bf.knnMatch(des1, des2, k=2)
+    # Ordenamos por la distancia
+    #if best:
+    #    matches = sorted(matches, key = lambda x:x.distance)
+    # Filtro
+    goodMatches = []
+    for m, n in matches:
+        if m.distance < dist * n.distance:
+            goodMatches.append(m)
+    goodMatches = goodMatches[:min(100,len(goodMatches)-1)]
+    print len(goodMatches)
+    # Generamos la nueva imagen
+    img3 = cv2.drawMatches(img1,kp1,img2,kp2,goodMatches,None,flags=2)
     return (img3)
 
 
-img1 = cv2.imread("./imagenes/Yosemite1.jpg", 0)
-img2 = cv2.imread("./imagenes/Yosemite2.jpg", 0)
-img3 = equiv(img1, img2, True, 0.7)
-showImg(img3, "Concordancias")
+img1 = cv2.imread("./imagenes/Yosemite1.jpg", 1)
+img2 = cv2.imread("./imagenes/Yosemite2.jpg", 1)
+img3 = BruteForceCC(img1, img2)
+showImg(img3, "Concordancias FuerzaBruta")
+img3 = LA2NN(img1, img2)
+showImg(img3, "Concordancias KNN")
+img3 = BruteForceCC(img1, img2, best = True)
+showImg(img3, "Concordancias FuerzaBruta BEST")
+
 # (b) Comentario de la inspeccion ocular
 
 # (c) Comparacion de tecnicas
 
-# EJERCICIO 3
+# EJERCICIO 3 y 4
+def joinImg2 (img1, img2):
+    # Calculamos los puntos y los decriptores
+    kp1, des1 = SIFT.detectAndCompute(img1, None)
+    kp2, des2 = SIFT.detectAndCompute(img2, None)
+    # Aplicar fuerza bruta y verificacion
+    bf = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=True)
+    matches = np.array(bf.match(des1, des2))
+    matches = sorted(matches, key = lambda x:x.distance)[:100]
+    # Cambiamos la estructura del dato
+    src = np.float32([ kp1[m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
+    dst = np.float32([ kp2[m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
+    # Encontramos la homografia
+    M, mask = cv2.findHomography(src, dst, cv2.RANSAC)
+    # Aplicamos la homografia
+    img2 = addBorders(img2, cv2.BORDER_CONSTANT, 200, (255,255,255))
+    showImg (img2)
+    img2 = cv2.warpPerspective(img1, M, dsize=(img2.shape[1],img2.shape[0]), borderMode=cv2.BORDER_TRANSPARENT)
+    # Devolvemos la img3 y la homografia
+    return (img2.copy(), M)
+
 def joinImg (img1, img2):
     # Minimo numero de puntos que aceptamos
     MIN_MATCH_COUNT = 10
@@ -111,40 +172,48 @@ def joinImg (img1, img2):
         M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
         matchesMask = mask.ravel().tolist()
 
-        h,w = img1.shape
+        h,w,c = img1.shape
         pts = np.float32([ [0,0],[0,h-1],[w-1,h-1],[w-1,0] ]).reshape(-1,1,2)
         dst = cv2.perspectiveTransform(pts,M)
 
-        img2 = cv2.polylines(img2,[np.int32(dst)],True,255,3, cv2.LINE_AA)
-        return img2
+        img2 = cv2.polylines(img2,[np.int32(dst)],True,(255,255,255),1, cv2.LINE_AA)
+        return img2, mask
     else:
         return False
 
-
-img1 = cv2.imread("./imagenes/mosaico002.jpg", 0)
-img2 = cv2.imread("./imagenes/mosaico003.jpg", 0)
-img3 = cv2.imread("./imagenes/mosaico004.jpg", 0)
-img4 = cv2.imread("./imagenes/mosaico005.jpg", 0)
-
-img12 = joinImg (img1, img2)
-img123 = joinImg (img3, img12)
-img1234 = joinImg (img4, img123)
-showImg (img1234, "Hola")
-#p2, p3 = getpoints (img2, img3)
-#pt1, pt2 = getpoints (img1, img2)
+def addBorders(img, bordertype, bordersize, value):
+    row, col = img.shape[:2]
+    border = cv2.copyMakeBorder(img, top=0, bottom=bordersize,
+    left=0, right=bordersize, borderType= bordertype, value=value )
+    return border
 
 
-h1, status = cv2.findHomography(p1, p2, cv2.RANSAC)
-h2 = cv2.findHomography(p2, p3, cv2.RANSAC)
-h3 = cv2.findHomography(pt1, pt2, cv2.RANSAC)
 
-print h1
-print status
+img1 = cv2.imread("./imagenes/mosaico002.jpg", 1)
+img2 = cv2.imread("./imagenes/mosaico003.jpg", 1)
+img3 = cv2.imread("./imagenes/mosaico004.jpg", 1)
+img4 = cv2.imread("./imagenes/mosaico005.jpg", 1)
+img5 = cv2.imread("./imagenes/mosaico006.jpg", 1)
+img6 = cv2.imread("./imagenes/mosaico007.jpg", 1)
 
-#kp, des = SURF.detectAndCompute(img,None)
-#print len(des[3])
-#getNOctaves()
-#getNOctaveLayers()
+imgs = [img1,img2,img3,img4,img5,img5]
+
+#img1 = addBorders(img1, cv2.BORDER_CONSTANT, 200, (255,255,255))
+showImg (img1)
+
+# Para ejercicio 1
+imgJOIN, M = joinImg2 (img1, img2)
+showImg (imgJOIN, "JOIN IMGS")
+
+def joinNimg (imgs):
+    original = imgs[0]
+    for img in imgs:
+        original,M = joinImg2(original,img)
+    return (original)
+
+# Para ejercicio 2
+imgJOIN = joinNimg(imgs)
+showImg (imgJOIN, "JOIN IMGS")
 
 # BONUS
 
