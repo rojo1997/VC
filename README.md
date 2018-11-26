@@ -1,2 +1,2 @@
 # VC
-Prácticas de Visión por Computador
+Visión por Computador
